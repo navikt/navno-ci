@@ -1,0 +1,79 @@
+# Pass the image as `var: image=<ref>` when the manifest templates `{{ image }}`, and as `workload-image` when it does not. The two are not interchangeable.
+name: Deploy to NAIS
+on:
+  workflow_call:
+    inputs:
+      cluster:
+        description: Cluster to deploy to, e.g. dev-gcp or prod-gcp.
+        type: string
+        required: true
+      resource:
+        description: Path to the resource to apply.
+        type: string
+        required: true
+      vars:
+        description: Path to a template variables file.
+        type: string
+        required: false
+        default: ""
+      var:
+        description: Inline template variables as comma-separated key=value pairs.
+        type: string
+        required: false
+        default: ""
+      workload-image:
+        description: Image to inject as the workload image, for manifests that do not template it.
+        type: string
+        required: false
+        default: ""
+      hpa-resource:
+        description: HPA resource applied before the main resource. Its failure does not fail the deploy.
+        type: string
+        required: false
+        default: ""
+      environment:
+        description: GitHub environment the job runs in.
+        type: string
+        required: false
+        default: ""
+      ref:
+        description: Git ref to check out. Defaults to the triggering ref.
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  # Queue, never cancel: a cancelled deploy can leave a rollout half done.
+  group: navno-deploy-${{ github.repository }}-${{ inputs.cluster }}-${{ inputs.resource }}-${{ inputs.vars }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Apply ${{ inputs.resource }} to ${{ inputs.cluster }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Apply ${{ inputs.hpa-resource }}
+        if: ${{ inputs.hpa-resource != '' }}
+        continue-on-error: true
+        uses: nais/deploy/actions/deploy@v2
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          RESOURCE: ${{ inputs.hpa-resource }}
+
+      - name: Apply ${{ inputs.resource }}
+        uses: nais/deploy/actions/deploy@v2
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          RESOURCE: ${{ inputs.resource }}
+          VAR: ${{ inputs.var }}
+          VARS: ${{ inputs.vars }}
+          WORKLOAD_IMAGE: ${{ inputs.workload-image }}

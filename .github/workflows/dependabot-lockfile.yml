@@ -1,0 +1,44 @@
+# Callers need `permissions: contents: write` and `secrets: inherit`.
+name: Update the pnpm lockfile on dependabot PRs
+on:
+  workflow_call:
+    secrets:
+      READER_TOKEN:
+        description: GitHub Packages token for private @navikt packages.
+        required: false
+
+concurrency:
+  group: navno-lockfile-${{ github.repository }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-lockfile:
+    name: Regenerate pnpm-lock.yaml
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: navikt/navno-actions/setup-node-pnpm@v1
+        with:
+          reader-token: ${{ secrets.READER_TOKEN }}
+          frozen-lockfile: "false"
+
+      - name: Commit and push the lockfile
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          if git diff --cached --quiet; then
+            echo "pnpm-lock.yaml is already up to date"
+            exit 0
+          fi
+          git commit -m "chore: update pnpm-lock.yaml"
+          git pull --rebase
+          git push

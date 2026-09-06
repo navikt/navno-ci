@@ -1,0 +1,92 @@
+# checkout -> setup-jvm -> ./gradlew build -> [push-image] docker push
+name: Build a JVM application
+on:
+  workflow_call:
+    inputs:
+      push-image:
+        description: Build and push the Docker image.
+        type: boolean
+        required: false
+        default: true
+      java-version:
+        description: JDK major version.
+        type: string
+        required: false
+        default: "21"
+      gradle-args:
+        description: Arguments passed to `./gradlew`.
+        type: string
+        required: false
+        default: build --no-daemon
+      team:
+        description: Nav team that owns the image registry.
+        type: string
+        required: false
+        default: navno
+      image-suffix:
+        description: Suffix appended to the image name.
+        type: string
+        required: false
+        default: ""
+      dockerfile:
+        description: Path to the Dockerfile.
+        type: string
+        required: false
+        default: Dockerfile
+      github-environment:
+        description: GitHub environment the job runs in.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      NAIS_WORKLOAD_IDENTITY_PROVIDER:
+        description: Overrides the identity provider that nais/login resolves on its own.
+        required: false
+    outputs:
+      image:
+        description: The pushed image reference. Empty when push-image is false.
+        value: ${{ jobs.build.outputs.image }}
+
+concurrency:
+  group: navno-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ inputs.push-image && 'Build and push image' || 'Build and test' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.github-environment }}
+    permissions:
+      # packages: read lets Gradle resolve private @navikt packages
+      # contents: write, is needed or setup-gradle warns about the dependency graph
+      contents: read
+      id-token: write
+      packages: read
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: navikt/navno-actions/setup-jvm@v1
+        with:
+          java-version: ${{ inputs.java-version }}
+
+      - name: Build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GRADLE_ARGS: ${{ inputs.gradle-args }}
+        run: |
+          # shellcheck disable=SC2086 -- GRADLE_ARGS is a flag list, not a path
+          ./gradlew $GRADLE_ARGS
+
+      - name: Build and push docker image
+        id: image
+        if: ${{ inputs.push-image }}
+        uses: nais/docker-build-push@v0
+        with:
+          team: ${{ inputs.team }}
+          project_id: ${{ vars.NAIS_MANAGEMENT_PROJECT_ID }}
+          identity_provider: ${{ secrets.NAIS_WORKLOAD_IDENTITY_PROVIDER }}
+          dockerfile: ${{ inputs.dockerfile }}
+          image_suffix: ${{ inputs.image-suffix }}

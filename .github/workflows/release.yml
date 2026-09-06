@@ -1,0 +1,51 @@
+name: Create GitHub release
+on:
+  workflow_call:
+    inputs:
+      target-commitish:
+        description: Branch the release points at.
+        type: string
+        required: false
+        default: main
+      tag-prefix:
+        description: Prefix for the tag. A Unix timestamp is appended.
+        type: string
+        required: false
+        default: release/prod@
+      name:
+        description: Release title. Defaults to `Release <ref name>`.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      RELEASE_TOKEN:
+        description: "PAT with `contents: write`, used to create the release."
+        required: true
+
+concurrency:
+  group: navno-release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Create a new release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Generate unique tag name
+        id: tag
+        env:
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: echo "name=${PREFIX}$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          target_commitish: ${{ inputs.target-commitish }}
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ inputs.name != '' && inputs.name || format('Release {0}', github.ref_name) }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}

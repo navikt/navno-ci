@@ -1,0 +1,211 @@
+# checkout -> [.env] -> setup -> [build caches] -> lint -> build -> test -> [post-build-commands] -> [push-image] cdn upload -> prune -> pnpm deploy -> docker push
+name: Build a Node application
+on:
+  workflow_call:
+    inputs:
+      push-image:
+        description: Upload to the CDN, prune to production dependencies and push the Docker image.
+        type: boolean
+        required: false
+        default: true
+      image-suffix:
+        description: Suffix appended to the image name.
+        type: string
+        required: false
+        default: ""
+      image-tag:
+        description: Extra tag applied to the image.
+        type: string
+        required: false
+        default: ""
+      platforms:
+        description: Docker build platforms.
+        type: string
+        required: false
+        default: linux/amd64
+      dockerfile:
+        description: Path to the Dockerfile.
+        type: string
+        required: false
+        default: Dockerfile
+      team:
+        description: Nav team that owns the image registry and the CDN bucket.
+        type: string
+        required: false
+        default: navno
+      github-environment:
+        description: GitHub environment the job runs in.
+        type: string
+        required: false
+        default: ""
+      env-file:
+        description: KEY=VALUE lines written to `env-file-path` before install.
+        type: string
+        required: false
+        default: ""
+      env-file-path:
+        description: Where to write `env-file`.
+        type: string
+        required: false
+        default: .env
+      env-file-copy-to:
+        description: Extra paths the env file is copied to, whitespace-separated.
+        type: string
+        required: false
+        default: ""
+      build-cache-paths:
+        description: Directories cached between runs, one per line.
+        type: string
+        required: false
+        default: ""
+      post-build-commands:
+        description: >
+          Bash script run after lint, build and test. Every secret the caller
+          passes is available as an environment variable of the same name.
+        type: string
+        required: false
+        default: ""
+      cdn-source:
+        description: Directory to upload to the Nav CDN.
+        type: string
+        required: false
+        default: ""
+      cdn-destination:
+        description: Destination path on the CDN.
+        type: string
+        required: false
+        default: ""
+      prune-remove:
+        description: >
+          Directories deleted before the production-only reinstall,
+          whitespace-separated, globs allowed. Empty skips the prune.
+        type: string
+        required: false
+        default: node_modules
+      pnpm-deploy:
+        description: >
+          `<package> <output-dir>` pairs, one per line, each run as
+          `pnpm --filter <package> deploy --prod <output-dir> --legacy`.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      READER_TOKEN:
+        description: GitHub Packages token for private @navikt packages.
+        required: false
+      NAIS_WORKLOAD_IDENTITY_PROVIDER:
+        description: Overrides the identity provider that nais/login resolves on its own.
+        required: false
+      SERVICE_SECRET:
+        description: Set as $SERVICE_SECRET during `pnpm run build`.
+        required: false
+    outputs:
+      image:
+        description: The pushed image reference. Empty when push-image is false.
+        value: ${{ jobs.build.outputs.image }}
+
+concurrency:
+  # Cancel superseded PR builds, queue everything else.
+  group: navno-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ inputs.push-image && 'Build and push image' || 'Build and test' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.github-environment }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write ${{ inputs.env-file-path }}
+        if: ${{ inputs.env-file != '' }}
+        uses: navikt/navno-actions/write-env-file@v1
+        with:
+          content: ${{ inputs.env-file }}
+          path: ${{ inputs.env-file-path }}
+          copy-to: ${{ inputs.env-file-copy-to }}
+
+      - uses: navikt/navno-actions/setup-node-pnpm@v1
+        with:
+          reader-token: ${{ secrets.READER_TOKEN }}
+
+      - name: Restore build caches
+        if: ${{ inputs.build-cache-paths != '' }}
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.build-cache-paths }}
+          key: ${{ runner.os }}-build-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
+      - name: Find lint, build and test scripts
+        id: scripts
+        uses: navikt/navno-actions/find-scripts@v1
+        with:
+          scripts: lint build test
+
+      - name: Lint
+        if: ${{ steps.scripts.outputs.lint == 'true' }}
+        run: pnpm run lint
+
+      - name: Build
+        if: ${{ steps.scripts.outputs.build == 'true' }}
+        env:
+          GIT_HASH: ${{ github.sha }}
+          SERVICE_SECRET: ${{ secrets.SERVICE_SECRET }}
+        run: pnpm run build
+
+      - name: Test
+        if: ${{ steps.scripts.outputs.test == 'true' }}
+        run: pnpm run test
+
+      - name: Run post-build commands
+        if: ${{ inputs.post-build-commands != '' }}
+        shell: bash # explicit => bash -eo pipefail
+        env: ${{ secrets }}
+        run: ${{ inputs.post-build-commands }}
+
+      - name: Upload static files to the Nav CDN
+        if: ${{ inputs.push-image && inputs.cdn-source != '' }}
+        uses: nais/deploy/actions/cdn-upload/v2@master
+        with:
+          team: ${{ inputs.team }}
+          source: ${{ inputs.cdn-source }}
+          destination: ${{ inputs.cdn-destination }}
+          project_id: ${{ vars.NAIS_MANAGEMENT_PROJECT_ID }}
+          identity_provider: ${{ secrets.NAIS_WORKLOAD_IDENTITY_PROVIDER }}
+
+      - name: Prune to production dependencies
+        if: ${{ inputs.push-image && inputs.prune-remove != '' }}
+        uses: navikt/navno-actions/prune-dev-deps@v1
+        with:
+          remove: ${{ inputs.prune-remove }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.READER_TOKEN }}
+
+      - name: Deploy packages without symlinks
+        if: ${{ inputs.push-image && inputs.pnpm-deploy != '' }}
+        uses: navikt/navno-actions/pnpm-deploy@v1
+        with:
+          packages: ${{ inputs.pnpm-deploy }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.READER_TOKEN }}
+
+      - name: Build and push docker image
+        id: image
+        if: ${{ inputs.push-image }}
+        uses: nais/docker-build-push@v0
+        with:
+          team: ${{ inputs.team }}
+          project_id: ${{ vars.NAIS_MANAGEMENT_PROJECT_ID }}
+          identity_provider: ${{ secrets.NAIS_WORKLOAD_IDENTITY_PROVIDER }}
+          dockerfile: ${{ inputs.dockerfile }}
+          image_suffix: ${{ inputs.image-suffix }}
+          tag: ${{ inputs.image-tag }}
+          platforms: ${{ inputs.platforms }}
