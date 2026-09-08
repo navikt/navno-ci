@@ -41,7 +41,7 @@ jobs:
         run: echo "name=${PREFIX}$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3
         with:
           target_commitish: ${{ inputs.target-commitish }}
           tag_name: ${{ steps.tag.outputs.name }}
