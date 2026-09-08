@@ -19,8 +19,8 @@ on:
         default: ""
     secrets:
       RELEASE_TOKEN:
-        description: "PAT with `contents: write`, used to create the release."
-        required: true
+        description: "PAT with `contents: write`, used to create the release. Optional; falls back to `github.token`, in which case the release does not trigger other workflows."
+        required: false
 
 concurrency:
   group: navno-release-${{ github.repository }}-${{ github.ref }}
@@ -48,4 +48,4 @@ jobs:
           name: ${{ inputs.name != '' && inputs.name || format('Release {0}', github.ref_name) }}
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}

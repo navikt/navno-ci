@@ -225,7 +225,8 @@ No secrets.
 ```
 
 Creates a release tagged `<tag-prefix><unix timestamp>` with generated
-release notes. Requires the `RELEASE_TOKEN` secret.
+release notes. `RELEASE_TOKEN` is optional; without it the release is created
+with `github.token`, which does not trigger other workflows.
 
 <details>
 <summary>Inputs and secrets</summary>
@@ -238,7 +239,7 @@ release notes. Requires the `RELEASE_TOKEN` secret.
 
 | Secret | Required | Description |
 |---|---|---|
-| `RELEASE_TOKEN` | yes | PAT with `contents: write`, used to create the release. |
+| `RELEASE_TOKEN` | no | PAT with `contents: write`, used to create the release. Falls back to `github.token`. |
 
 </details>
 
