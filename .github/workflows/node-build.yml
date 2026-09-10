@@ -1,4 +1,4 @@
-# checkout -> [.env] -> setup -> [build caches] -> lint -> build -> test -> [post-build-commands] -> [push-image] cdn upload -> prune -> pnpm deploy -> docker push
+# checkout -> [.env] -> setup -> [build caches] -> lint -> build -> test -> [playwright] -> [post-build-commands] -> [push-image] cdn upload -> prune -> pnpm deploy -> docker push
 name: Build a Node application
 on:
   workflow_call:
@@ -55,6 +55,14 @@ on:
         default: ""
       build-cache-paths:
         description: Directories cached between runs, one per line.
+        type: string
+        required: false
+        default: ""
+      playwright:
+        description: >
+          Command that runs the Playwright suite, run after lint, build and test
+          with the browsers restored from a cache keyed on the installed
+          Playwright version. Empty skips Playwright.
         type: string
         required: false
         default: ""
@@ -137,7 +145,7 @@ jobs:
 
       - name: Restore build caches
         if: ${{ inputs.build-cache-paths != '' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.build-cache-paths }}
           key: ${{ runner.os }}-build-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -164,6 +172,13 @@ jobs:
       - name: Test
         if: ${{ steps.scripts.outputs.test == 'true' }}
         run: pnpm run test
+
+      - name: Run the Playwright suite
+        if: ${{ inputs.playwright != '' }}
+        uses: navikt/navno-actions/run-playwright@v1
+        env: ${{ secrets }}
+        with:
+          run: ${{ inputs.playwright }}
 
       - name: Run post-build commands
         if: ${{ inputs.post-build-commands != '' }}

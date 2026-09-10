@@ -106,7 +106,8 @@ package.json has the script. package.json must declare the Node version in
 | `env-file` | `''` | `KEY=VALUE` lines written to `env-file-path` before install. Blank lines and `#` comments are allowed; any other line fails the build. |
 | `env-file-path` | `.env` | Where to write `env-file`. |
 | `env-file-copy-to` | `''` | Extra paths the env file is copied to, space- or newline-separated. |
-| `build-cache-paths` | `''` | Directories kept between runs, keyed on the lockfile, one per line. E.g. `packages/nextjs/.next/cache`. |
+| `build-cache-paths` | `''` | Directories kept between runs, keyed on the lockfile, one per line. E.g. `packages/nextjs/.next/cache`. Written afresh every run, so keep it to small, mutable build output. |
+| `playwright` | `''` | Command that runs the Playwright suite, with the browsers restored from a cache keyed on the installed Playwright version. Empty skips Playwright. |
 | `post-build-commands` | `''` | Bash script run after lint, build and test with `-e -o pipefail`. For a repo-specific check such as a Playwright suite. |
 | `cdn-source` | `''` | Static directory to upload to the Nav CDN. Empty skips the upload. |
 | `cdn-destination` | `''` | CDN destination path, e.g. `my-app/prod`. |
@@ -126,8 +127,16 @@ inline:
 ```yaml
     with:
       post-build-commands: |
-        PLAYWRIGHT_TOKEN=$MY_SECRET pnpm exec playwright test
+        PLAYWRIGHT_TOKEN=$MY_SECRET pnpm exec james bond
     secrets: inherit
+```
+
+Gate the `playwright` input with the same condition as the suite, or a skipped run still pays for
+the browser download:
+
+```yaml
+    with:
+      playwright: ${{ !inputs.SKIP_TESTS && 'pnpm run test:e2e' || '' }}
 ```
 
 </details>

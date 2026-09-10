@@ -77,7 +77,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GRADLE_ARGS: ${{ inputs.gradle-args }}
         run: |
-          # shellcheck disable=SC2086 -- GRADLE_ARGS is a flag list, not a path
+          # GRADLE_ARGS is a flag list, not a path, so it must word-split.
+          # shellcheck disable=SC2086
           ./gradlew $GRADLE_ARGS
 
       - name: Build and push docker image
