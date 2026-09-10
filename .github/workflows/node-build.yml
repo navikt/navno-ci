@@ -129,7 +129,8 @@ jobs:
     outputs:
       image: ${{ steps.image.outputs.image }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Write ${{ inputs.env-file-path }}
         if: ${{ inputs.env-file != '' }}
@@ -139,11 +140,12 @@ jobs:
           path: ${{ inputs.env-file-path }}
           copy-to: ${{ inputs.env-file-copy-to }}
 
-      - uses: navikt/navno-actions/setup-node-pnpm@v1
+      - name: Setup node/pnpm
+        uses: navikt/navno-actions/setup-node-pnpm@v1
         with:
           reader-token: ${{ secrets.READER_TOKEN }}
 
-      - name: Restore build caches
+      - name: Restore build cache
         if: ${{ inputs.build-cache-paths != '' }}
         uses: actions/cache@v6
         with:
@@ -152,7 +154,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
-      - name: Find lint, build and test scripts
+      - name: Find lint, build, and test scripts
         id: scripts
         uses: navikt/navno-actions/find-scripts@v1
         with:
@@ -173,20 +175,20 @@ jobs:
         if: ${{ steps.scripts.outputs.test == 'true' }}
         run: pnpm run test
 
-      - name: Run the Playwright suite
+      - name: Playwright
         if: ${{ inputs.playwright != '' }}
         uses: navikt/navno-actions/run-playwright@v1
         env: ${{ secrets }}
         with:
           run: ${{ inputs.playwright }}
 
-      - name: Run post-build commands
+      - name: Post-build commands
         if: ${{ inputs.post-build-commands != '' }}
         shell: bash # explicit => bash -eo pipefail
         env: ${{ secrets }}
         run: ${{ inputs.post-build-commands }}
 
-      - name: Upload static files to the Nav CDN
+      - name: Upload to CDN
         if: ${{ inputs.push-image && inputs.cdn-source != '' }}
         uses: nais/deploy/actions/cdn-upload/v2@master
         with:
@@ -212,7 +214,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.READER_TOKEN }}
 
-      - name: Build and push docker image
+      - name: Build and push Docker image
         id: image
         if: ${{ inputs.push-image }}
         uses: nais/docker-build-push@v0
