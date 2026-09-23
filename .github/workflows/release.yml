@@ -17,6 +17,11 @@ on:
         type: string
         required: false
         default: ""
+      body:
+        description: Text placed above the generated release notes, e.g. the deployed image.
+        type: string
+        required: false
+        default: ""
     secrets:
       RELEASE_TOKEN:
         description: "PAT with `contents: write`, used to create the release. Optional; falls back to `github.token`, in which case the release does not trigger other workflows."
@@ -46,6 +51,7 @@ jobs:
           target_commitish: ${{ inputs.target-commitish }}
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ inputs.name != '' && inputs.name || format('Release {0}', github.ref_name) }}
+          body: ${{ inputs.body }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
