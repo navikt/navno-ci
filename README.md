@@ -9,7 +9,7 @@ Reference a workflow as `navikt/navno-ci/.github/workflows/<name>.yml@v1`.
 | `node-build.yml` | pnpm install, lint, build, test; then CDN upload, prune to prod deps and push a Docker image | `image` |
 | `jvm-build.yml` | Gradle build; then push a Docker image | `image` |
 | `nais-deploy.yml` | Apply one NAIS resource to a cluster | |
-| `release.yml` | Create a GitHub release with a timestamped tag | |
+| `release.yml` | Create a GitHub release with a timestamped tag and the deployed image ([rollback](#rollback)) | |
 | `dependabot-lockfile.yml` | Regenerate `pnpm-lock.yaml` on dependabot PRs | |
 
 `image` is empty when `push-image: false`.
@@ -80,9 +80,11 @@ jobs:
       var: image=${{ needs.build.outputs.image }}
 
   release:
-    needs: deploy
+    needs: [build, deploy]
     uses: navikt/navno-ci/.github/workflows/release.yml@v1
     permissions: { contents: write }
+    with:
+      image: ${{ needs.build.outputs.image }}   # lets a rollback redeploy this release
     secrets: inherit
 ```
 
@@ -227,30 +229,100 @@ No secrets.
 
 ```yaml
   release:
-    needs: deploy
+    needs: [build, deploy]
     uses: navikt/navno-ci/.github/workflows/release.yml@v1
     permissions: { contents: write }
+    with:
+      image: ${{ needs.build.outputs.image }}
     secrets: inherit
 ```
 
 Creates a release tagged `<tag-prefix><unix timestamp>` with generated
-release notes. `RELEASE_TOKEN` is optional; without it the release is created
-with `github.token`, which does not trigger other workflows.
+release notes. The tag points at the built commit (`github.sha`), not
+wherever `main` has moved to since. `RELEASE_TOKEN` is optional; without it
+the release is created with `github.token`, which does not trigger other
+workflows.
+
+`image` is recorded as the first line of the release body,
+`` Deployed image: `<image>` ``, above `body` and the generated notes. It must
+be digest-pinned (`...@sha256:<digest>`), like the `image` output of
+`node-build.yml` and `jvm-build.yml`. The job then checks the release with
+`navikt/navno-actions/find-release@v1` and fails if a [rollback](#rollback)
+couldn't use it. A release without `image` cannot be rolled back to.
 
 <details>
 <summary>Inputs and secrets</summary>
 
 | Input | Default | Description |
 |---|---|---|
-| `target-commitish` | `main` | Branch the release points at. |
+| `target-commitish` | `github.sha` | Commit or branch the tag points at. |
 | `tag-prefix` | `release/prod@` | Prefix for the generated tag. |
 | `name` | `Release <ref name>` | Release title. |
+| `image` | `''` | Deployed image, digest-pinned. Required for rollback. |
+| `body` | `''` | Text placed below the image line and above the generated release notes. |
 
 | Secret | Required | Description |
 |---|---|---|
 | `RELEASE_TOKEN` | no | PAT with `contents: write`, used to create the release. Falls back to `github.token`. |
 
 </details>
+
+## Rollback
+
+A rollback redeploys an earlier release's image without building or testing.
+There is no shared rollback workflow: the repo's own workflow uses
+`navikt/navno-actions/find-release@v1` to look up the release's commit and
+recorded image, then deploys them with `nais-deploy.yml`.
+
+```yaml
+# rollback.prod.yml
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Release tag. Empty = the release before the newest one.
+        type: string
+        required: false
+        default: ''
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      image: ${{ steps.release.outputs.image }}
+    steps:
+      - id: release
+        uses: navikt/navno-actions/find-release@v1
+        with:
+          tag: ${{ inputs.release-tag }}
+          # tag-prefix: ...   # if release.yml sets a custom tag-prefix
+
+  deploy:
+    needs: find
+    uses: navikt/navno-ci/.github/workflows/nais-deploy.yml@v1
+    permissions: { contents: read, id-token: write }
+    with:
+      cluster: prod-gcp
+      ref: ${{ needs.find.outputs.sha }}
+      resource: .nais/config.yml
+      vars: .nais/vars-prod.yml
+      var: image=${{ needs.find.outputs.image }}   # or workload-image: for JVM apps
+```
+
+An empty tag picks the release before the newest one, skipping releases of
+the same commit; see navno-actions for details.
+
+- The `.nais` files come from the release's commit, since `ref` checks it
+  out, so later changes to the manifest or vars are rolled back too.
+- A rollback creates no release, so running it again with an empty tag
+  redeploys the same release. Pass a tag to go further back.
+- The next push to `main` deploys `main` again. Revert or fix on `main`
+  before merging anything else.
+- If the ordinary deploy sets `environment`, set the same one here so its
+  approvals and branch restrictions apply.
 
 ## Dependabot lockfile
 
@@ -323,13 +395,16 @@ Every workflow declares both:
 
 - Builds: one per calling workflow and ref. A superseded PR build is
   cancelled; everything else queues. 30 minutes.
-- Deploys: one per repository, cluster, resource and vars file. Queued,
-  never cancelled. 15 minutes.
+- Deploys: one per repository, cluster, resource and vars file. Queued; a
+  running deploy is never cancelled, but a newer queued run replaces an
+  older queued one. 15 minutes.
 - Releases: one per repository and ref. 10 minutes.
 - Lockfile: one per repository and PR branch, cancelled when superseded.
   15 minutes.
 
 Builds and deploys never share a group, so a PR check cannot block a deploy.
+
+Rollbacks go through `nais-deploy.yml` and share these groups.
 
 ## `dependabot.yml` for consumer repos
 

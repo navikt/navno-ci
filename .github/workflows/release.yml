@@ -1,12 +1,14 @@
+# Tags the built commit and creates a release whose body records the deployed image.
+# When an image is given, the release is read back with navno-actions/find-release to confirm a rollback can use it.
 name: Create GitHub release
 on:
   workflow_call:
     inputs:
       target-commitish:
-        description: Branch the release points at.
+        description: Commit or branch the tag points at. Defaults to the commit that triggered the workflow, the one that was built.
         type: string
         required: false
-        default: main
+        default: ${{ github.sha }}
       tag-prefix:
         description: Prefix for the tag. A Unix timestamp is appended.
         type: string
@@ -17,8 +19,13 @@ on:
         type: string
         required: false
         default: ""
+      image:
+        description: Image the release deployed. Recorded as a `Deployed image:` line that navno-actions/find-release reads, e.g. to roll back.
+        type: string
+        required: false
+        default: ""
       body:
-        description: Text placed above the generated release notes, e.g. the deployed image.
+        description: Text placed below the image line and above the generated release notes.
         type: string
         required: false
         default: ""
@@ -51,7 +58,18 @@ jobs:
           target_commitish: ${{ inputs.target-commitish }}
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ inputs.name != '' && inputs.name || format('Release {0}', github.ref_name) }}
-          body: ${{ inputs.body }}
+          # navno-actions/find-release parses this line; change the two together.
+          body: |
+            ${{ inputs.image && format('Deployed image: `{0}`', inputs.image) }}
+
+            ${{ inputs.body }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - name: Check that a rollback can use this release
+        if: ${{ inputs.image != '' }}
+        uses: navikt/navno-actions/find-release@v1
+        with:
+          tag: ${{ steps.tag.outputs.name }}
+          tag-prefix: ${{ inputs.tag-prefix }}
