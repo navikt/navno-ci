@@ -30,6 +30,10 @@ jobs:
           frozen-lockfile: "false"
 
       - name: Commit and push the lockfile
+        env:
+          # Caller repos' husky hooks (e.g. pre-push tests) expect build output this job doesn't produce.
+          # PR CI runs those checks on the pushed commit anyway.
+          HUSKY: "0"
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
