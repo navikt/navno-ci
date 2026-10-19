@@ -64,13 +64,13 @@ jobs:
       - name: Apply ${{ inputs.hpa-resource }}
         if: ${{ inputs.hpa-resource != '' }}
         continue-on-error: true
-        uses: nais/deploy/actions/deploy@v2
+        uses: nais/deploy/actions/deploy@v3
         env:
           CLUSTER: ${{ inputs.cluster }}
           RESOURCE: ${{ inputs.hpa-resource }}
 
       - name: Apply ${{ inputs.resource }}
-        uses: nais/deploy/actions/deploy@v2
+        uses: nais/deploy/actions/deploy@v3
         env:
           CLUSTER: ${{ inputs.cluster }}
           RESOURCE: ${{ inputs.resource }}
