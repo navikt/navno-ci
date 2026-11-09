@@ -160,6 +160,8 @@ invalid SBOM fails the build instead of being attested with a warning.
 - The SBOM describes the lockfile, not the bundle: it can list code the
   bundler shook out, and misses anything bundled from `devDependencies`. Keep
   what ends up in the image in `dependencies`.
+- The app itself is left out of it, since the image scan lists it from the
+  `package.json` in the image, and the two entries would conflict.
 - Only for images without `node_modules`. With both, each package is listed
   twice, which Dependency-Track may reject.
 - It also runs on PR checks, so a failing `pnpm sbom` shows up before the merge.

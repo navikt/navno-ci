@@ -210,6 +210,14 @@ jobs:
             echo "::error ::pnpm sbom failed. sbom-from-lockfile needs a pnpm version with the sbom command (this is $(pnpm --version))."
             exit 1
           fi
+          # Drop the app itself, the SBOM's root. The image scan lists it too, from the package.json in the image,
+          # under the same bom-ref but with other fields, and nais/attest-sign fails on the conflict when it merges
+          # the two. Its dependency edges go with it, since the image may have no package.json to attach them to
+          jq '(.metadata.component["bom-ref"]) as $root
+            | del(.metadata.component)
+            | .dependencies |= map(select(.ref != $root) | if .dependsOn then .dependsOn -= [$root] else . end)' \
+            "$SBOM" > "$SBOM.tmp"
+          mv "$SBOM.tmp" "$SBOM"
           echo "Wrote $(jq '.components | length' "$SBOM") components to $SBOM"
           echo "path=$SBOM" >> "$GITHUB_OUTPUT"
 
