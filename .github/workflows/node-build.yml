@@ -1,4 +1,4 @@
-# checkout -> [.env] -> setup -> [build caches] -> lint -> build -> test -> [playwright] -> [post-build-commands] -> [push-image] cdn upload -> prune -> pnpm deploy -> docker push
+# checkout -> [.env] -> setup -> [build caches] -> lint -> build -> test -> [playwright] -> [post-build-commands] -> [lockfile sbom] -> [push-image] cdn upload -> prune -> pnpm deploy -> docker push
 name: Build a Node application
 on:
   workflow_call:
@@ -97,6 +97,15 @@ on:
         type: string
         required: false
         default: ""
+      sbom-from-lockfile:
+        description: >
+          Add the root package's production dependencies from pnpm-lock.yaml
+          to the image's SBOM, and fail the build if the SBOM is invalid. For
+          images that bundle their dependencies instead of shipping
+          node_modules, where the image scan finds none.
+        type: boolean
+        required: false
+        default: false
     secrets:
       READER_TOKEN:
         description: GitHub Packages token for private @navikt packages.
@@ -188,6 +197,22 @@ jobs:
         env: ${{ secrets }}
         run: ${{ inputs.post-build-commands }}
 
+      # Before the prune, so pnpm reads licenses and metadata from the full install.
+      # Also on PR checks, so a failure shows up before the merge
+      - name: SBOM from the lockfile
+        id: lockfile-sbom
+        if: ${{ inputs.sbom-from-lockfile }}
+        shell: bash
+        env:
+          SBOM: ${{ runner.temp }}/lockfile-sbom.json
+        run: |
+          if ! pnpm sbom --sbom-format cyclonedx --sbom-type application --prod --out "$SBOM"; then
+            echo "::error ::pnpm sbom failed. sbom-from-lockfile needs a pnpm version with the sbom command (this is $(pnpm --version))."
+            exit 1
+          fi
+          echo "Wrote $(jq '.components | length' "$SBOM") components to $SBOM"
+          echo "path=$SBOM" >> "$GITHUB_OUTPUT"
+
       - name: Upload to CDN
         if: ${{ inputs.push-image && inputs.cdn-source != '' }}
         uses: nais/deploy/actions/cdn-upload/v2@master
@@ -226,3 +251,8 @@ jobs:
           image_suffix: ${{ inputs.image-suffix }}
           tag: ${{ inputs.image-tag }}
           platforms: ${{ inputs.platforms }}
+          # Merged with the image scan's SBOM before it is attested
+          additional_sboms: ${{ steps.lockfile-sbom.outputs.path }}
+          # nais's default is warn, which attests an invalid SBOM anyway. With a lockfile
+          # SBOM the app's dependencies are only in the attestation if it's valid, so fail instead
+          sbom_check: ${{ inputs.sbom-from-lockfile && 'error' || 'warn' }}

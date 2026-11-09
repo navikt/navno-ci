@@ -115,6 +115,7 @@ package.json has the script. package.json must declare the Node version in
 | `cdn-destination` | `''` | CDN destination path, e.g. `my-app/prod`. |
 | `prune-remove` | `node_modules` | Directories deleted before reinstalling with `--prod`, space- or newline-separated, globs allowed. Empty skips the prune. |
 | `pnpm-deploy` | `''` | `<package> <output-dir>` pairs, one per line, each run as `pnpm --filter <package> deploy --prod <output-dir> --legacy`. |
+| `sbom-from-lockfile` | `false` | Add the root package's production dependencies from `pnpm-lock.yaml` to the image's SBOM, and fail the build if the SBOM is invalid. For images without `node_modules`; see [SBOM for a bundled app](#sbom-for-a-bundled-app). |
 
 | Secret | Required | Description |
 |---|---|---|
@@ -142,6 +143,28 @@ the image pull:
 ```
 
 </details>
+
+### SBOM for a bundled app
+
+`nais/docker-build-push` attests an SBOM from a Trivy scan of the image, and
+Nais sends the attestation of every running image to Dependency-Track, shown in
+Nais Console under Vulnerabilities. In an image, Trivy finds npm packages only
+through the `package.json` files in `node_modules`. An app that bundles its
+dependencies and ships no `node_modules` gets an SBOM with only the base image.
+
+`sbom-from-lockfile: true` runs `pnpm sbom --prod` after the tests and passes
+the result to `docker-build-push` as `additional_sboms`, which merges it with
+the image scan before attesting. It also sets `sbom_check: error`, so an
+invalid SBOM fails the build instead of being attested with a warning.
+
+- The SBOM describes the lockfile, not the bundle: it can list code the
+  bundler shook out, and misses anything bundled from `devDependencies`. Keep
+  what ends up in the image in `dependencies`.
+- Only for images without `node_modules`. With both, each package is listed
+  twice, which Dependency-Track may reject.
+- It also runs on PR checks, so a failing `pnpm sbom` shows up before the merge.
+- To check a deployed image:
+  `cosign verify-attestation --type cyclonedx --certificate-identity-regexp '^https://github.com/navikt/' --certificate-oidc-issuer https://token.actions.githubusercontent.com <image@digest>`.
 
 ## JVM app
 
