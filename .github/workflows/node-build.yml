@@ -250,7 +250,7 @@ jobs:
       - name: Build and push Docker image
         id: image
         if: ${{ inputs.push-image }}
-        uses: nais/docker-build-push@v0
+        uses: nais/docker-build-push@v1
         with:
           team: ${{ inputs.team }}
           project_id: ${{ vars.NAIS_MANAGEMENT_PROJECT_ID }}
